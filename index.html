@@ -62,6 +62,21 @@
   </div>
 </div>
 
+<!-- MODAL: Rename Set -->
+<div class="modal-overlay" id="modal-rename-set">
+  <div class="modal">
+    <h2>Rename Set</h2>
+    <div class="form-group">
+      <label>Set Name</label>
+      <input type="text" id="rename-set-name" placeholder="e.g. Exam 1" />
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal('modal-rename-set')">Cancel</button>
+      <button class="btn btn-primary" onclick="renameSet()">Rename</button>
+    </div>
+  </div>
+</div>
+
 <!-- MODAL: Add / Edit Question -->
 <div class="modal-overlay" id="modal-question">
   <div class="modal">
@@ -88,6 +103,7 @@ let data = JSON.parse(localStorage.getItem('flashquiz') || '{"sets":[]}');
 const save = () => localStorage.setItem('flashquiz', JSON.stringify(data));
 const uid  = () => Math.random().toString(36).slice(2, 10);
 const esc  = s => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+const escNl = s => esc(s).replace(/\n/g,'<br>');
 
 // ── Navigation ─────────────────────────────────────────────────────────────
 function showView(v) {
@@ -135,6 +151,7 @@ function renderAdmin() {
     <div class="sidebar-item ${activeSetId === s.id ? 'active' : ''}" onclick="selectSet('${s.id}')">
       <span>${esc(s.name)}</span>
       <div style="display:flex;gap:.25rem;flex-shrink:0">
+        <button class="del-btn" title="Rename Set" onclick="openRenameSetModal(event,'${s.id}')">✏</button>
         <button class="del-btn" title="Export CSV" onclick="exportSet(event,'${s.id}')">⬇</button>
         <button class="del-btn" onclick="deleteSet(event,'${s.id}')">✕</button>
       </div>
@@ -154,7 +171,7 @@ function renderAdminQuestions() {
     ? set.questions.map(q => `
       <div class="question-item">
         <div class="q-header">
-          <h4>${esc(q.question)}</h4>
+          <h4>${escNl(q.question)}</h4>
           <div class="flex gap-2" style="flex-shrink:0">
             <button class="btn btn-ghost" style="padding:.3rem .7rem;font-size:.8rem" onclick="openEditQuestion('${q.id}')">Edit</button>
             <button class="btn btn-danger" style="padding:.3rem .7rem;font-size:.8rem" onclick="deleteQuestion('${q.id}')">Delete</button>
@@ -327,6 +344,27 @@ function handleCsvImportFile(e) {
   reader.readAsText(file);
 }
 
+let renamingSetId = null;
+
+function openRenameSetModal(e, id) {
+  e.stopPropagation();
+  renamingSetId = id;
+  const set = data.sets.find(s => s.id === id);
+  document.getElementById('rename-set-name').value = set.name;
+  openModal('modal-rename-set');
+  setTimeout(() => document.getElementById('rename-set-name').select(), 60);
+}
+
+function renameSet() {
+  const name = document.getElementById('rename-set-name').value.trim();
+  if (!name) return;
+  const set = data.sets.find(s => s.id === renamingSetId);
+  set.name = name;
+  save();
+  closeModal('modal-rename-set');
+  renderAdmin();
+}
+
 function openNewSetModal() {
   document.getElementById('new-set-name').value = '';
   openModal('modal-new-set');
@@ -397,10 +435,10 @@ function addAnswerRow(text = '', correct = false) {
   row.className = 'answer-input-row';
   row.innerHTML = `
     <input type="checkbox" title="Correct answer" ${correct ? 'checked' : ''} />
-    <input type="text" placeholder="Answer option..." value="${esc(text)}" />
+    <textarea placeholder="Answer option..." rows="1">${esc(text)}</textarea>
     <button class="remove-ans" onclick="this.parentElement.remove()" title="Remove">✕</button>`;
   c.appendChild(row);
-  row.querySelector('input[type="text"]').focus();
+  row.querySelector('textarea').focus();
 }
 
 function saveQuestion() {
@@ -410,7 +448,7 @@ function saveQuestion() {
   const rows    = document.querySelectorAll('#answers-container .answer-input-row');
   const answers = [];
   rows.forEach(r => {
-    const t = r.querySelector('input[type="text"]').value.trim();
+    const t = r.querySelector('textarea').value.trim();
     const c = r.querySelector('input[type="checkbox"]').checked;
     if (t) answers.push({ id: uid(), text: t, correct: c });
   });
@@ -471,7 +509,7 @@ function renderCard() {
       <span style="font-size:.85rem;color:var(--text-muted);white-space:nowrap">Score: ${score}</span>
     </div>
     <div class="quiz-card">
-      <div class="quiz-question">${esc(q.question)}</div>
+      <div class="quiz-question">${escNl(q.question)}</div>
       <div class="quiz-hint">${multi ? `Select all ${q.answers.filter(a=>a.correct).length} correct answers` : 'Select the one correct answer'}</div>
       <div class="quiz-answers" id="quiz-answers">
         ${q.answers.map((a, i) => `
