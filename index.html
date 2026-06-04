@@ -1,0 +1,574 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>FlashQuiz</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<nav>
+  <span class="logo">⚡ FlashQuiz</span>
+  <button id="nav-home" class="active" onclick="showView('home')">🏠 Home</button>
+  <button id="nav-admin" onclick="showView('admin')">⚙️ Admin</button>
+</nav>
+
+<!-- HOME -->
+<div id="view-home" class="view active">
+  <h1>Your Question Sets</h1>
+  <p class="muted">Pick a set to start a quiz.</p>
+  <div id="sets-grid" class="sets-grid"></div>
+</div>
+
+<!-- ADMIN -->
+<div id="view-admin" class="view">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1.5rem">
+    <div>
+      <h1>Admin Panel</h1>
+      <p class="muted">Manage question sets and their questions.</p>
+    </div>
+    <button class="btn btn-primary" onclick="openNewSetModal()">+ New Set</button>
+  </div>
+  <div class="admin-layout">
+    <div>
+      <div style="font-size:0.75rem;color:var(--text-muted);margin-bottom:0.5rem;text-transform:uppercase;letter-spacing:.06em">Sets</div>
+      <div id="admin-sets-list"></div>
+    </div>
+    <div id="admin-questions-panel">
+      <div class="empty-state"><div class="icon">📂</div><p>Select a set from the left.</p></div>
+    </div>
+  </div>
+  <input type="file" id="csv-import-input" accept=".csv,text/csv" style="display:none" />
+</div>
+
+<!-- QUIZ -->
+<div id="view-quiz" class="view">
+  <div id="quiz-content"></div>
+</div>
+
+<!-- MODAL: New Set -->
+<div class="modal-overlay" id="modal-new-set">
+  <div class="modal">
+    <h2>Create New Set</h2>
+    <div class="form-group">
+      <label>Set Name</label>
+      <input type="text" id="new-set-name" placeholder="e.g. Exam 1" />
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal('modal-new-set')">Cancel</button>
+      <button class="btn btn-primary" onclick="createSet()">Create</button>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL: Add / Edit Question -->
+<div class="modal-overlay" id="modal-question">
+  <div class="modal">
+    <h2 id="modal-q-title">Add Question</h2>
+    <div class="form-group">
+      <label>Question</label>
+      <textarea id="q-text" rows="3" placeholder="Enter your question..."></textarea>
+    </div>
+    <div class="form-group">
+      <label>Answers &nbsp;<span style="color:var(--text-muted);font-weight:400">— check the box(es) for correct answer(s)</span></label>
+      <div id="answers-container"></div>
+      <button class="btn btn-ghost" style="margin-top:.5rem;font-size:.85rem" onclick="addAnswerRow()">+ Add Answer</button>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal('modal-question')">Cancel</button>
+      <button class="btn btn-primary" onclick="saveQuestion()">Save Question</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// ── Storage ────────────────────────────────────────────────────────────────
+let data = JSON.parse(localStorage.getItem('flashquiz') || '{"sets":[]}');
+const save = () => localStorage.setItem('flashquiz', JSON.stringify(data));
+const uid  = () => Math.random().toString(36).slice(2, 10);
+const esc  = s => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+
+// ── Navigation ─────────────────────────────────────────────────────────────
+function showView(v) {
+  document.querySelectorAll('.view').forEach(el => el.classList.remove('active'));
+  document.querySelectorAll('nav button').forEach(el => el.classList.remove('active'));
+  document.getElementById('view-' + v).classList.add('active');
+  const navBtn = document.getElementById('nav-' + v);
+  if (navBtn) navBtn.classList.add('active');
+  if (v === 'home')  renderHome();
+  if (v === 'admin') renderAdmin();
+}
+
+// ── Modals ─────────────────────────────────────────────────────────────────
+const openModal  = id => document.getElementById(id).classList.add('open');
+const closeModal = id => document.getElementById(id).classList.remove('open');
+
+
+// ── Home ───────────────────────────────────────────────────────────────────
+function renderHome() {
+  const grid = document.getElementById('sets-grid');
+  if (!data.sets.length) {
+    grid.innerHTML = `<div class="empty-state" style="grid-column:1/-1"><div class="icon">📝</div><p>No sets yet — head to Admin to create one!</p></div>`;
+    return;
+  }
+  grid.innerHTML = data.sets.map(s => `
+    <div class="set-card" onclick="startQuiz('${s.id}')">
+      <h3>${esc(s.name)}</h3>
+      <p>${s.questions.length} question${s.questions.length !== 1 ? 's' : ''}</p>
+    </div>`).join('');
+}
+
+// ── Admin ──────────────────────────────────────────────────────────────────
+let activeSetId    = null;
+let editingQId     = null;
+
+function renderAdmin() {
+  const list = document.getElementById('admin-sets-list');
+  if (!data.sets.length) {
+    list.innerHTML = `<p style="color:var(--text-muted);font-size:.85rem;padding:.4rem">No sets yet.</p>`;
+    document.getElementById('admin-questions-panel').innerHTML =
+      `<div class="empty-state"><div class="icon">📂</div><p>Select a set from the left.</p></div>`;
+    return;
+  }
+  list.innerHTML = data.sets.map(s => `
+    <div class="sidebar-item ${activeSetId === s.id ? 'active' : ''}" onclick="selectSet('${s.id}')">
+      <span>${esc(s.name)}</span>
+      <div style="display:flex;gap:.25rem;flex-shrink:0">
+        <button class="del-btn" title="Export CSV" onclick="exportSet(event,'${s.id}')">⬇</button>
+        <button class="del-btn" onclick="deleteSet(event,'${s.id}')">✕</button>
+      </div>
+    </div>`).join('');
+  if (activeSetId) renderAdminQuestions();
+}
+
+function selectSet(id) {
+  activeSetId = id;
+  renderAdmin();
+}
+
+function renderAdminQuestions() {
+  const set = data.sets.find(s => s.id === activeSetId);
+  const panel = document.getElementById('admin-questions-panel');
+  const qHtml = set.questions.length
+    ? set.questions.map(q => `
+      <div class="question-item">
+        <div class="q-header">
+          <h4>${esc(q.question)}</h4>
+          <div class="flex gap-2" style="flex-shrink:0">
+            <button class="btn btn-ghost" style="padding:.3rem .7rem;font-size:.8rem" onclick="openEditQuestion('${q.id}')">Edit</button>
+            <button class="btn btn-danger" style="padding:.3rem .7rem;font-size:.8rem" onclick="deleteQuestion('${q.id}')">Delete</button>
+          </div>
+        </div>
+        <div class="answers-list">
+          ${q.answers.map(a => `
+            <div class="answer-row ${a.correct ? 'correct' : ''}">
+              <span>${esc(a.text)}</span>
+              ${a.correct ? '<span class="correct-badge">✓ Correct</span>' : ''}
+            </div>`).join('')}
+        </div>
+      </div>`).join('')
+    : `<p style="color:var(--text-muted);margin-bottom:1rem;font-size:.9rem">No questions yet.</p>`;
+
+  panel.innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem">
+      <h2 style="margin:0">${esc(set.name)}</h2>
+      <div class="flex gap-2">
+        <button class="btn btn-ghost" onclick="triggerCsvImport()">Import CSV</button>
+        <button class="btn btn-primary" onclick="openAddQuestion()">+ Add Question</button>
+      </div>
+    </div>
+    ${qHtml}`;
+}
+
+function triggerCsvImport() {
+  if (!activeSetId) {
+    alert('Select a set first.');
+    return;
+  }
+  const fileInput = document.getElementById('csv-import-input');
+  fileInput.value = '';
+  fileInput.click();
+}
+
+function parseCsvCells(text) {
+  const cells = [];
+  let current = '';
+  let inQuotes = false;
+
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+
+    if (ch === '"') {
+      if (inQuotes && text[i + 1] === '"') {
+        current += '"';
+        i++;
+      } else {
+        inQuotes = !inQuotes;
+      }
+      continue;
+    }
+
+    if (!inQuotes && (ch === ',' || ch === '\n' || ch === '\r')) {
+      cells.push(current);
+      current = '';
+      if (ch === '\r' && text[i + 1] === '\n') i++;
+      continue;
+    }
+
+    current += ch;
+  }
+
+  cells.push(current);
+  return cells.map(c => c.trim()).filter(Boolean);
+}
+
+function parseImportedQuestions(csvText) {
+  const tokens = parseCsvCells(csvText);
+  const questions = [];
+  let currentQuestion = null;
+
+  const pushCurrent = () => {
+    if (!currentQuestion) return;
+    if (currentQuestion.answers.length < 2) {
+      throw new Error(`Question "${currentQuestion.question}" must have at least 2 answers.`);
+    }
+    if (!currentQuestion.answers.some(a => a.correct)) {
+      throw new Error(`Question "${currentQuestion.question}" must have at least 1 correct answer marker (e.g. a)).`);
+    }
+    questions.push(currentQuestion);
+    currentQuestion = null;
+  };
+
+  for (const token of tokens) {
+    const markerMatch = token.match(/^([a-z])\)\s*(.*)$/i);
+
+    if (!markerMatch) {
+      pushCurrent();
+      currentQuestion = {
+        question: token,
+        answers: [],
+        pendingCorrect: new Set(),
+      };
+      continue;
+    }
+
+    if (!currentQuestion) {
+      throw new Error(`Found answer marker "${token}" before any question.`);
+    }
+
+    const label = markerMatch[1].toLowerCase();
+    const text = markerMatch[2].trim();
+
+    if (!text) {
+      const answerToMark = currentQuestion.answers.find(a => a.label === label);
+      if (answerToMark) answerToMark.correct = true;
+      else currentQuestion.pendingCorrect.add(label);
+      continue;
+    }
+
+    const answer = {
+      label,
+      text,
+      correct: currentQuestion.pendingCorrect.has(label),
+    };
+    currentQuestion.answers.push(answer);
+  }
+
+  pushCurrent();
+  return questions.map(q => ({
+    question: q.question,
+    answers: q.answers.map(a => ({ text: a.text, correct: a.correct })),
+  }));
+}
+
+function importCsvIntoActiveSet(csvText) {
+  const set = data.sets.find(s => s.id === activeSetId);
+  if (!set) {
+    throw new Error('No active set selected.');
+  }
+
+  const imported = parseImportedQuestions(csvText);
+  if (!imported.length) {
+    throw new Error('No valid questions found in the CSV.');
+  }
+
+  imported.forEach(q => {
+    set.questions.push({
+      id: uid(),
+      question: q.question,
+      answers: q.answers.map(a => ({ id: uid(), text: a.text, correct: a.correct })),
+    });
+  });
+
+  save();
+  renderAdminQuestions();
+  alert(`Imported ${imported.length} question${imported.length === 1 ? '' : 's'} into ${set.name}.`);
+}
+
+function handleCsvImportFile(e) {
+  const file = e.target.files && e.target.files[0];
+  if (!file) return;
+
+  const reader = new FileReader();
+  reader.onload = () => {
+    try {
+      importCsvIntoActiveSet(String(reader.result || ''));
+    } catch (err) {
+      alert(`CSV import failed: ${err.message}`);
+    } finally {
+      e.target.value = '';
+    }
+  };
+  reader.onerror = () => {
+    alert('Could not read the selected CSV file.');
+    e.target.value = '';
+  };
+  reader.readAsText(file);
+}
+
+function openNewSetModal() {
+  document.getElementById('new-set-name').value = '';
+  openModal('modal-new-set');
+  setTimeout(() => document.getElementById('new-set-name').focus(), 60);
+}
+
+function createSet() {
+  const name = document.getElementById('new-set-name').value.trim();
+  if (!name) return;
+  const s = { id: uid(), name, questions: [] };
+  data.sets.push(s);
+  save();
+  activeSetId = s.id;
+  closeModal('modal-new-set');
+  renderAdmin();
+}
+
+function exportSet(e, id) {
+  e.stopPropagation();
+  const set = data.sets.find(s => s.id === id);
+  if (!set || !set.questions.length) { alert('This set has no questions to export.'); return; }
+  const labels = 'abcdefghijklmnopqrstuvwxyz';
+  const lines = [];
+  set.questions.forEach(q => {
+    lines.push(q.question);
+    q.answers.forEach((a, i) => lines.push(`${labels[i]}) ${a.text}`));
+    q.answers.forEach((a, i) => { if (a.correct) lines.push(`${labels[i]})`); });
+  });
+  const blob = new Blob([lines.join('\n')], { type: 'text/csv' });
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement('a');
+  a.href = url; a.download = `${set.name}.csv`; a.click();
+  URL.revokeObjectURL(url);
+}
+
+function deleteSet(e, id) {
+  e.stopPropagation();
+  if (!confirm('Delete this set and all its questions?')) return;
+  data.sets = data.sets.filter(s => s.id !== id);
+  if (activeSetId === id) activeSetId = null;
+  save();
+  renderAdmin();
+}
+
+function openAddQuestion() {
+  editingQId = null;
+  document.getElementById('modal-q-title').textContent = 'Add Question';
+  document.getElementById('q-text').value = '';
+  document.getElementById('answers-container').innerHTML = '';
+  addAnswerRow(); addAnswerRow(); addAnswerRow();
+  openModal('modal-question');
+}
+
+function openEditQuestion(qid) {
+  const set = data.sets.find(s => s.id === activeSetId);
+  const q   = set.questions.find(q => q.id === qid);
+  editingQId = qid;
+  document.getElementById('modal-q-title').textContent = 'Edit Question';
+  document.getElementById('q-text').value = q.question;
+  document.getElementById('answers-container').innerHTML = '';
+  q.answers.forEach(a => addAnswerRow(a.text, a.correct));
+  openModal('modal-question');
+}
+
+function addAnswerRow(text = '', correct = false) {
+  const c   = document.getElementById('answers-container');
+  const row = document.createElement('div');
+  row.className = 'answer-input-row';
+  row.innerHTML = `
+    <input type="checkbox" title="Correct answer" ${correct ? 'checked' : ''} />
+    <input type="text" placeholder="Answer option..." value="${esc(text)}" />
+    <button class="remove-ans" onclick="this.parentElement.remove()" title="Remove">✕</button>`;
+  c.appendChild(row);
+  row.querySelector('input[type="text"]').focus();
+}
+
+function saveQuestion() {
+  const text = document.getElementById('q-text').value.trim();
+  if (!text) { alert('Please enter a question.'); return; }
+
+  const rows    = document.querySelectorAll('#answers-container .answer-input-row');
+  const answers = [];
+  rows.forEach(r => {
+    const t = r.querySelector('input[type="text"]').value.trim();
+    const c = r.querySelector('input[type="checkbox"]').checked;
+    if (t) answers.push({ id: uid(), text: t, correct: c });
+  });
+
+  if (answers.length < 2)          { alert('Add at least 2 answer options.'); return; }
+  if (!answers.some(a => a.correct)) { alert('Mark at least one answer as correct.'); return; }
+
+  const set = data.sets.find(s => s.id === activeSetId);
+  if (editingQId) {
+    const q  = set.questions.find(q => q.id === editingQId);
+    q.question = text; q.answers = answers;
+  } else {
+    set.questions.push({ id: uid(), question: text, answers });
+  }
+  save();
+  closeModal('modal-question');
+  renderAdminQuestions();
+}
+
+function deleteQuestion(qid) {
+  if (!confirm('Delete this question?')) return;
+  const set = data.sets.find(s => s.id === activeSetId);
+  set.questions = set.questions.filter(q => q.id !== qid);
+  save();
+  renderAdminQuestions();
+}
+
+// ── Quiz ───────────────────────────────────────────────────────────────────
+let quiz = null;
+
+function startQuiz(setId) {
+  const set = data.sets.find(s => s.id === setId);
+  if (!set.questions.length) { alert('This set has no questions yet!'); return; }
+  quiz = {
+    set,
+    questions: [...set.questions]
+      .sort(() => Math.random() - 0.5)
+      .map(q => ({ ...q, answers: [...q.answers].sort(() => Math.random() - 0.5) })),
+    current:   0,
+    score:     0,
+    answered:  false,
+    selected:  new Set(),
+  };
+  showView('quiz');
+  renderCard();
+}
+
+function renderCard() {
+  const { questions, current, score } = quiz;
+  const q     = questions[current];
+  const total = questions.length;
+  const multi = q.answers.filter(a => a.correct).length > 1;
+
+  document.getElementById('quiz-content').innerHTML = `
+    <div class="quiz-progress">
+      <span style="font-size:.85rem;color:var(--text-muted);white-space:nowrap">Q ${current + 1} / ${total}</span>
+      <div class="progress-bar-wrap"><div class="progress-bar" style="width:${(current / total) * 100}%"></div></div>
+      <span style="font-size:.85rem;color:var(--text-muted);white-space:nowrap">Score: ${score}</span>
+    </div>
+    <div class="quiz-card">
+      <div class="quiz-question">${esc(q.question)}</div>
+      <div class="quiz-hint">${multi ? `Select all ${q.answers.filter(a=>a.correct).length} correct answers` : 'Select the one correct answer'}</div>
+      <div class="quiz-answers" id="quiz-answers">
+        ${q.answers.map((a, i) => `
+          <div class="quiz-answer" id="qa-${i}" onclick="toggleAnswer(${i},${multi})">
+            <input type="${multi ? 'checkbox' : 'radio'}" id="inp-${i}" />
+            <label for="inp-${i}" style="cursor:pointer;flex:1;pointer-events:none">${esc(a.text)}</label>
+          </div>`).join('')}
+      </div>
+      <div class="quiz-footer">
+        <div id="result-badge"></div>
+        <button class="btn btn-primary" id="submit-btn" onclick="submitAnswer()">Submit</button>
+      </div>
+    </div>`;
+  quiz.answered = false;
+  quiz.selected = new Set();
+}
+
+function toggleAnswer(i, multi) {
+  if (quiz.answered) return;
+  const el  = document.getElementById('qa-' + i);
+  const inp = document.getElementById('inp-' + i);
+  if (multi) {
+    quiz.selected.has(i) ? quiz.selected.delete(i) : quiz.selected.add(i);
+    el.classList.toggle('selected', quiz.selected.has(i));
+    inp.checked = quiz.selected.has(i);
+  } else {
+    quiz.questions[quiz.current].answers.forEach((_, j) => {
+      document.getElementById('qa-' + j)?.classList.remove('selected');
+      document.getElementById('inp-' + j).checked = false;
+    });
+    quiz.selected = new Set([i]);
+    el.classList.add('selected');
+    inp.checked = true;
+  }
+}
+
+function submitAnswer() {
+  if (quiz.answered) {
+    quiz.current++;
+    quiz.current >= quiz.questions.length ? renderScore() : renderCard();
+    return;
+  }
+  if (!quiz.selected.size) { alert('Please select an answer first.'); return; }
+
+  quiz.answered = true;
+  const q           = quiz.questions[quiz.current];
+  const correctSet  = new Set(q.answers.map((a, i) => a.correct ? i : -1).filter(i => i >= 0));
+  const isCorrect   =
+    quiz.selected.size === correctSet.size &&
+    [...quiz.selected].every(i => correctSet.has(i));
+
+  if (isCorrect) quiz.score++;
+
+  q.answers.forEach((a, i) => {
+    const el = document.getElementById('qa-' + i);
+    el.classList.add('disabled');
+    if (a.correct)               el.classList.add('correct-reveal');
+    else if (quiz.selected.has(i)) el.classList.add('wrong-reveal');
+  });
+
+  document.getElementById('result-badge').innerHTML = isCorrect
+    ? '<span class="result-badge correct">✓ Correct!</span>'
+    : '<span class="result-badge wrong">✗ Wrong</span>';
+
+  document.getElementById('submit-btn').textContent =
+    quiz.current + 1 < quiz.questions.length ? 'Next →' : 'See Results';
+}
+
+function renderScore() {
+  const { score, questions, set } = quiz;
+  const total = questions.length;
+  const pct   = Math.round((score / total) * 100);
+  const msg   = pct >= 80 ? '🎉 Great job!' : pct >= 60 ? '👍 Good effort!' : '📚 Keep studying!';
+
+  document.getElementById('quiz-content').innerHTML = `
+    <div class="score-screen">
+      <h2 style="margin-bottom:1.5rem">${esc(set.name)} — Results</h2>
+      <div class="score-circle">
+        <span class="score-num">${score}</span>
+        <span class="score-denom">/ ${total}</span>
+      </div>
+      <p style="font-size:1.4rem;font-weight:700;margin-bottom:.4rem">${pct}%</p>
+      <p class="muted">${msg}</p>
+      <div style="display:flex;gap:1rem;justify-content:center;margin-top:2rem">
+        <button class="btn btn-ghost" onclick="showView('home')">← Back to Home</button>
+        <button class="btn btn-primary" onclick="startQuiz('${set.id}')">Try Again</button>
+      </div>
+    </div>`;
+}
+
+// ── Init ───────────────────────────────────────────────────────────────────
+document.getElementById('new-set-name').addEventListener('keydown', e => {
+  if (e.key === 'Enter') createSet();
+});
+document.getElementById('csv-import-input').addEventListener('change', handleCsvImportFile);
+
+renderHome();
+</script>
+</body>
+</html>
