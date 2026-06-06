@@ -491,6 +491,7 @@ function startQuiz(setId) {
     score:     0,
     answered:  false,
     selected:  new Set(),
+    mistakes:  [],
   };
   showView('quiz');
   renderCard();
@@ -561,7 +562,15 @@ function submitAnswer() {
     quiz.selected.size === correctSet.size &&
     [...quiz.selected].every(i => correctSet.has(i));
 
-  if (isCorrect) quiz.score++;
+  if (isCorrect) {
+    quiz.score++;
+  } else {
+    quiz.mistakes.push({
+      question: q.question,
+      answers:  q.answers,
+      selected: new Set(quiz.selected),
+    });
+  }
 
   q.answers.forEach((a, i) => {
     const el = document.getElementById('qa-' + i);
@@ -579,10 +588,29 @@ function submitAnswer() {
 }
 
 function renderScore() {
-  const { score, questions, set } = quiz;
+  const { score, questions, set, mistakes } = quiz;
   const total = questions.length;
   const pct   = Math.round((score / total) * 100);
   const msg   = pct >= 80 ? '🎉 Great job!' : pct >= 60 ? '👍 Good effort!' : '📚 Keep studying!';
+
+  const mistakesHtml = !mistakes.length ? '' : `
+    <div style="margin-top:2.5rem;text-align:left;max-width:600px;width:100%">
+      <h3 style="margin-bottom:1rem">Pogrešno odgovorena pitanja (${mistakes.length})</h3>
+      ${mistakes.map(m => `
+        <div style="background:var(--surface);border-radius:.75rem;padding:1rem;margin-bottom:1rem;border:1px solid var(--border)">
+          <p style="font-weight:600;margin-bottom:.75rem">${escNl(m.question)}</p>
+          ${m.answers.map((a, i) => {
+            const wasSelected = m.selected.has(i);
+            const style = a.correct   ? 'color:#16a34a;font-weight:600'
+                        : wasSelected ? 'color:#dc2626'
+                        : 'color:var(--text-muted)';
+            const badge = a.correct   ? ' ✓ Tačno'
+                        : wasSelected ? ' ✗ Tvoj odgovor'
+                        : '';
+            return `<div style="padding:.3rem 0;${style}">${esc(a.text)}${badge}</div>`;
+          }).join('')}
+        </div>`).join('')}
+    </div>`;
 
   document.getElementById('quiz-content').innerHTML = `
     <div class="score-screen">
@@ -597,6 +625,7 @@ function renderScore() {
         <button class="btn btn-ghost" onclick="showView('home')">← Back to Home</button>
         <button class="btn btn-primary" onclick="startQuiz('${set.id}')">Try Again</button>
       </div>
+      ${mistakesHtml}
     </div>`;
 }
 
