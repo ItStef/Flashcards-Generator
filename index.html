@@ -604,8 +604,9 @@ function renderScore() {
             const style = a.correct   ? 'color:#16a34a;font-weight:600'
                         : wasSelected ? 'color:#dc2626'
                         : 'color:var(--text-muted)';
-            const badge = a.correct   ? ' ✓ Tačno'
-                        : wasSelected ? ' ✗ Tvoj odgovor'
+            const badge = a.correct && wasSelected ? ' ✓ Tačno / Tvoj odgovor'
+                        : a.correct               ? ' ✓ Tačno'
+                        : wasSelected             ? ' ✗ Tvoj odgovor'
                         : '';
             return `<div style="padding:.3rem 0;${style}">${esc(a.text)}${badge}</div>`;
           }).join('')}
