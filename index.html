@@ -89,6 +89,8 @@
       <label>Answers &nbsp;<span style="color:var(--text-muted);font-weight:400">— check the box(es) for correct answer(s)</span></label>
       <div id="answers-container"></div>
       <button class="btn btn-ghost" style="margin-top:.5rem;font-size:.85rem" onclick="addAnswerRow()">+ Add Answer</button>
+      <button class="btn btn-ghost" style="margin-top:.5rem;font-size:.85rem" onclick="addAnswerRow();addAnswerRow()">+ Add 2 Answers</button>
+      <button class="btn btn-ghost" style="margin-top:.5rem;font-size:.85rem" onclick="addAnswerRow();addAnswerRow();addAnswerRow()">+ Add 3 Answers</button>
     </div>
     <div class="modal-footer">
       <button class="btn btn-ghost" onclick="closeModal('modal-question')">Cancel</button>
@@ -507,11 +509,10 @@ function renderCard() {
     <div class="quiz-progress">
       <span style="font-size:.85rem;color:var(--text-muted);white-space:nowrap">Q ${current + 1} / ${total}</span>
       <div class="progress-bar-wrap"><div class="progress-bar" style="width:${(current / total) * 100}%"></div></div>
-      <span style="font-size:.85rem;color:var(--text-muted);white-space:nowrap">Score: ${score}</span>
+      <span style="font-size:.85rem;color:var(--text-muted);white-space:nowrap">Score: ${Math.round(score * 100) / 100}</span>
     </div>
     <div class="quiz-card">
       <div class="quiz-question">${escNl(q.question)}</div>
-      <div class="quiz-hint">${multi ? `Select all ${q.answers.filter(a=>a.correct).length} correct answers` : 'Select the one correct answer'}</div>
       <div class="quiz-answers" id="quiz-answers">
         ${q.answers.map((a, i) => `
           <div class="quiz-answer" id="qa-${i}" onclick="toggleAnswer(${i},${multi})">
@@ -558,17 +559,18 @@ function submitAnswer() {
   quiz.answered = true;
   const q           = quiz.questions[quiz.current];
   const correctSet  = new Set(q.answers.map((a, i) => a.correct ? i : -1).filter(i => i >= 0));
-  const isCorrect   =
-    quiz.selected.size === correctSet.size &&
-    [...quiz.selected].every(i => correctSet.has(i));
+  const hasWrong    = [...quiz.selected].some(i => !correctSet.has(i));
+  const numCorrectSelected = [...quiz.selected].filter(i => correctSet.has(i)).length;
+  const partial     = hasWrong ? 0 : numCorrectSelected / correctSet.size;
+  const isCorrect   = partial === 1;
 
-  if (isCorrect) {
-    quiz.score++;
-  } else {
+  quiz.score += partial;
+  if (partial < 1) {
     quiz.mistakes.push({
       question: q.question,
       answers:  q.answers,
       selected: new Set(quiz.selected),
+      partial,
     });
   }
 
@@ -579,9 +581,12 @@ function submitAnswer() {
     else if (quiz.selected.has(i)) el.classList.add('wrong-reveal');
   });
 
-  document.getElementById('result-badge').innerHTML = isCorrect
+  const badgeText = isCorrect
     ? '<span class="result-badge correct">✓ Correct!</span>'
-    : '<span class="result-badge wrong">✗ Wrong</span>';
+    : (partial > 0
+        ? `<span class="result-badge wrong">⚡ Partial — ${Math.round(partial * 100)}% (${numCorrectSelected}/${correctSet.size} correct)</span>`
+        : '<span class="result-badge wrong">✗ Wrong</span>');
+  document.getElementById('result-badge').innerHTML = badgeText;
 
   document.getElementById('submit-btn').textContent =
     quiz.current + 1 < quiz.questions.length ? 'Next →' : 'See Results';
@@ -617,7 +622,7 @@ function renderScore() {
     <div class="score-screen">
       <h2 style="margin-bottom:1.5rem">${esc(set.name)} — Results</h2>
       <div class="score-circle">
-        <span class="score-num">${score}</span>
+        <span class="score-num">${Math.round(score * 100) / 100}</span>
         <span class="score-denom">/ ${total}</span>
       </div>
       <p style="font-size:1.4rem;font-weight:700;margin-bottom:.4rem">${pct}%</p>
