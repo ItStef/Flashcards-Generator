@@ -228,7 +228,7 @@ function parseCsvCells(text) {
       continue;
     }
 
-    if (!inQuotes && (ch === ',' || ch === '\n' || ch === '\r')) {
+    if (!inQuotes && (ch === '\n' || ch === '\r')) {
       cells.push(current);
       current = '';
       if (ch === '\r' && text[i + 1] === '\n') i++;
@@ -249,8 +249,8 @@ function parseImportedQuestions(csvText) {
 
   const pushCurrent = () => {
     if (!currentQuestion) return;
-    if (currentQuestion.answers.length < 2) {
-      throw new Error(`Question "${currentQuestion.question}" must have at least 2 answers.`);
+    if (currentQuestion.answers.length < 1) {
+      throw new Error(`Question "${currentQuestion.question}" must have at least 1 answer.`);
     }
     if (!currentQuestion.answers.some(a => a.correct)) {
       throw new Error(`Question "${currentQuestion.question}" must have at least 1 correct answer marker (e.g. a)).`);
